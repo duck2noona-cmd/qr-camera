@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QR 수동 연속 촬영기</title>
+    <title>QR 촬영기</title>
     <!-- QR 인식 및 ZIP 압축 라이브러리 -->
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -16,7 +16,16 @@
             margin: 0;
             padding: 16px;
         }
-        h2 { color: #1d1d1f; margin: 10px 0; }
+        h2 { color: #1d1d1f; margin: 10px 0 4px 0; }
+        
+        /* 주의 문구 스타일 추가 */
+        .notice {
+            font-size: 12px;
+            color: #ff3b30;
+            margin-bottom: 12px;
+            font-weight: 500;
+        }
+
         .camera-container {
             position: relative;
             width: 100%;
@@ -106,6 +115,9 @@
 <body>
 
     <h2>QR 수동 연속 촬영기</h2>
+    <!-- 주의 문구 영역 -->
+    <div class="notice">프로토타입 버전입니다. 외부 배포를 금지합니다.</div>
+
     <div class="count-badge">촬영된 사진: <span id="photoCount">0</span>장</div>
 
     <!-- 카메라 화면 -->
