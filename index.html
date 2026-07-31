@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QR 연속 촬영기</title>
+    <title>QR 수동 연속 촬영기</title>
     <!-- QR 인식 및 ZIP 압축 라이브러리 -->
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -31,6 +31,7 @@
             margin: 12px 0;
             font-weight: bold;
             color: #007aff;
+            min-height: 24px;
         }
         .count-badge {
             display: inline-block;
@@ -41,19 +42,25 @@
             font-size: 14px;
             margin-bottom: 10px;
         }
-        .btn-zip {
+        .btn {
             display: block;
             width: 100%;
             max-width: 400px;
             margin: 10px auto;
             padding: 16px 0;
-            background: #007aff;
             color: white;
             border-radius: 12px;
             font-weight: bold;
             font-size: 17px;
             border: none;
             cursor: pointer;
+        }
+        .btn-next {
+            background: #34c759;
+            display: none; /* 기본 숨김 */
+        }
+        .btn-zip {
+            background: #007aff;
         }
         .btn-zip:disabled {
             background: #c7c7cc;
@@ -90,11 +97,15 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
+        .badge-dup {
+            color: #ff9500;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
 
-    <h2>QR 연속 촬영기</h2>
+    <h2>QR 수동 연속 촬영기</h2>
     <div class="count-badge">촬영된 사진: <span id="photoCount">0</span>장</div>
 
     <!-- 카메라 화면 -->
@@ -104,8 +115,12 @@
 
     <div class="status" id="status">카메라 권한 확인 중...</div>
 
-    <!-- 한 번에 압축 저장 버튼 -->
-    <button id="zipBtn" class="btn-zip" onclick="downloadAllAsZip()" disabled>
+    <!-- 다음 버튼 & ZIP 다운로드 버튼 -->
+    <button id="nextBtn" class="btn btn-next" onclick="resumeScanning()">
+        📸 다음 촬영하기
+    </button>
+
+    <button id="zipBtn" class="btn btn-zip" onclick="downloadAllAsZip()" disabled>
         📦 사진 전체 ZIP 다운로드 (0장)
     </button>
 
@@ -120,12 +135,12 @@
         const ctx = canvas.getContext('2d');
         const statusText = document.getElementById('status');
         const photoCountText = document.getElementById('photoCount');
+        const nextBtn = document.getElementById('nextBtn');
         const zipBtn = document.getElementById('zipBtn');
         const photoList = document.getElementById('photoList');
 
-        // 촬영된 사진 데이터를 담을 배열
         const capturedPhotos = []; 
-        let isCoolDown = false; // 연속 인식 방지용 딜레이
+        let isPaused = false; // 스캔 일시정지 상태 변수
 
         navigator.mediaDevices.getUserMedia({ 
             video: { facingMode: "environment" } 
@@ -133,14 +148,14 @@
             video.srcObject = stream;
             video.setAttribute("playsinline", true);
             video.play();
-            statusText.innerText = "QR 코드를 대면 연속으로 촬영됩니다!";
+            statusText.innerText = "QR 코드를 비춰주세요...";
             requestAnimationFrame(scanQR);
         }).catch((err) => {
             statusText.innerText = "카메라를 켤 수 없습니다.";
         });
 
         function scanQR() {
-            if (!isCoolDown && video.readyState === video.HAVE_ENOUGH_DATA) {
+            if (!isPaused && video.readyState === video.HAVE_ENOUGH_DATA) {
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -149,62 +164,90 @@
                 const code = jsQR(imageData.data, imageData.width, imageData.height);
 
                 if (code && code.data.trim() !== "") {
-                    // QR 인식 완료
-                    isCoolDown = true; // 1.5초간 딜레이 (같은 QR 중복 촬영 방지)
-                    addPhotoToList(code.data);
-
-                    // 1.5초 뒤 다음 QR 촬영 가능
-                    setTimeout(() => {
-                        isCoolDown = false;
-                        statusText.innerText = "다음 QR 코드를 비춰주세요...";
-                    }, 1500);
+                    // QR 인식 성공 시 스캔 정지 및 '다음' 버튼 띄우기
+                    isPaused = true;
+                    takeSnapshot(code.data);
+                    return;
                 }
             }
             requestAnimationFrame(scanQR);
         }
 
-        function addPhotoToList(qrValue) {
-            const safeFileName = qrValue.replace(/[^a-zA-Z0-9가-힣_-]/g, "_") + ".jpg";
+        // 중복 파일명 처리 및 사진 저장 함수
+        function takeSnapshot(qrValue) {
+            const rawName = qrValue.replace(/[^a-zA-Z0-9가-힣_-]/g, "_");
+            
+            // 동일한 원본 QR값 개수 확인 (중복 체크)
+            const sameCount = capturedPhotos.filter(p => p.originalQr === rawName).length;
+            
+            let finalFileName = "";
+            let isDuplicate = false;
+
+            if (sameCount === 0) {
+                finalFileName = `${rawName}.jpg`;
+            } else if (sameCount === 1) {
+                finalFileName = `${rawName}_(중복).jpg`;
+                isDuplicate = true;
+            } else {
+                finalFileName = `${rawName}_(중복${sameCount - 1}).jpg`;
+                isDuplicate = true;
+            }
+
             const jpegDataUrl = canvas.toDataURL('image/jpeg', 0.9);
 
-            // 배열에 추가
+            // 데이터 배열 저장
             capturedPhotos.push({
-                fileName: safeFileName,
+                originalQr: rawName,
+                fileName: finalFileName,
                 dataUrl: jpegDataUrl
             });
 
-            // 화면 UI 업데이트
+            // UI 업데이트
             photoCountText.innerText = capturedPhotos.length;
             zipBtn.innerText = `📦 사진 전체 ZIP 다운로드 (${capturedPhotos.length}장)`;
             zipBtn.disabled = false;
-            statusText.innerText = `📸 촬영 성공: ${safeFileName}`;
+            
+            if (isDuplicate) {
+                statusText.innerHTML = `⚠️ 인식 성공 <span class="badge-dup">(중복 감지: ${finalFileName})</span>`;
+            } else {
+                statusText.innerText = `📸 인식 성공: ${finalFileName}`;
+            }
 
-            // 촬영 목록 리스트 아이템 추가
+            // '다음' 버튼 보여주기
+            nextBtn.style.display = 'block';
+
+            // 목록 표시 추가
             const item = document.createElement('div');
             item.className = 'photo-item';
             item.innerHTML = `
                 <img src="${jpegDataUrl}">
                 <div class="photo-info">
-                    <div class="photo-name">${safeFileName}</div>
+                    <div class="photo-name">${finalFileName}</div>
                 </div>
             `;
             photoList.insertBefore(item, photoList.firstChild);
         }
 
-        // ZIP 파일로 한 번에 다운로드
+        // '다음 촬영하기' 버튼 클릭 시 작동
+        function resumeScanning() {
+            nextBtn.style.display = 'none';
+            statusText.innerText = "다음 QR 코드를 비춰주세요...";
+            isPaused = false;
+            requestAnimationFrame(scanQR);
+        }
+
+        // ZIP 다운로드
         async function downloadAllAsZip() {
             if (capturedPhotos.length === 0) return;
 
             statusText.innerText = "압축 파일 생성 중...";
             const zip = new JSZip();
 
-            // 모든 사진을 ZIP에 추가
             capturedPhotos.forEach((photo) => {
                 const base64Data = photo.dataUrl.split(',')[1];
                 zip.file(photo.fileName, base64Data, { base64: true });
             });
 
-            // ZIP 생성 및 다운로드 실행
             const content = await zip.generateAsync({ type: "blob" });
             const zipUrl = URL.createObjectURL(content);
 
