@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR 코드 자동 촬영기</title>
+    <!-- jsQR 라이브러리 불러오기 -->
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            text-align: center;
+            background: #f5f5f7;
+            margin: 0;
+            padding: 20px;
+        }
+        h2 {
+            color: #1d1d1f;
+            margin-bottom: 20px;
+        }
+        .camera-container {
+            position: relative;
+            width: 100%;
+            max-width: 400px;
+            margin: 0 auto;
+            border-radius: 16px;
+            overflow: hidden;
+            background: #000;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+        }
+        video {
+            width: 100%;
+            display: block;
+        }
+        .status {
+            margin: 15px 0;
+            font-weight: 600;
+            font-size: 15px;
+            color: #007aff;
+            word-break: break-all;
+        }
+        .result-container {
+            margin-top: 20px;
+            display: none;
+        }
+        canvas {
+            display: none;
+        }
+        img {
+            width: 100%;
+            max-width: 400px;
+            border-radius: 16px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+            margin-bottom: 15px;
+        }
+        .btn-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: 400px;
+            margin: 0 auto;
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 14px 0;
+            background: #34c759;
+            color: white;
+            text-decoration: none;
+            border-radius: 12px;
+            font-weight: bold;
+            font-size: 16px;
+            border: none;
+            cursor: pointer;
+            text-align: center;
+        }
+        .btn-retry {
+            background: #ff3b30;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>QR 인식 자동 촬영기</h2>
+    
+    <!-- 카메라 화면 영역 -->
+    <div class="camera-container" id="camBox">
+        <video id="video" playsinline></video>
+    </div>
+
+    <!-- 상태 안내 메시지 -->
+    <div class="status" id="status">카메라 권한을 확인하는 중...</div>
+
+    <!-- 촬영 완료 후 결과 표시 영역 -->
+    <div class="result-container" id="resultBox">
+        <img id="capturedImg" alt="촬영된 사진">
+        <div class="btn-group">
+            <a id="downloadBtn" class="btn" download="">앨범에 저장하기</a>
+            <button class="btn btn-retry" onclick="resetCamera()">다시 촬영하기</button>
+        </div>
+    </div>
+
+    <!-- 캡처 처리를 위한 숨겨진 캔버스 -->
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const statusText = document.getElementById('status');
+        const camBox = document.getElementById('camBox');
+        const resultBox = document.getElementById('resultBox');
+        const capturedImg = document.getElementById('capturedImg');
+        const downloadBtn = document.getElementById('downloadBtn');
+
+        let isCaptured = false;
+
+        // 스마트폰 후면 카메라 호출
+        navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: "environment" } 
+        }).then((stream) => {
+            video.srcObject = stream;
+            video.setAttribute("playsinline", true);
+            video.play();
+            statusText.innerText = "QR 코드를 카메라에 비춰주세요...";
+            requestAnimationFrame(scanQR);
+        }).catch((err) => {
+            statusText.innerText = "카메라를 켤 수 없습니다. 브라우저 카메라 권한을 허용해주세요.";
+            console.error(err);
+        });
+
+        // 프레임별 QR 코드 스캔 함수
+        function scanQR() {
+            if (isCaptured) return;
+
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const code = jsQR(imageData.data, imageData.width, imageData.height);
+
+                // QR 코드 감지 성공 시
+                if (code && code.data.trim() !== "") {
+                    isCaptured = true;
+                    takeSnapshot(code.data);
+                    return;
+                }
+            }
+            requestAnimationFrame(scanQR);
+        }
+
+        // 스냅샷 생성 및 다운로드 링크 설정
+        function takeSnapshot(qrValue) {
+            // 파일명으로 사용할 수 없는 특수문자는 '_'로 변경 ([QR값].png)
+            const safeFileName = qrValue.replace(/[^a-zA-Z0-9가-힣_-]/g, "_") + ".png";
+            
+            // 현재 화면의 이미지를 DataURL 형태로 캡처
+            const imageDataUrl = canvas.toDataURL('image/png');
+
+            // 화면 전환
+            camBox.style.display = 'none';
+            statusText.innerText = `인식 성공! (파일명: ${safeFileName})`;
+
+            capturedImg.src = imageDataUrl;
+            downloadBtn.href = imageDataUrl;
+            downloadBtn.download = safeFileName;
+
+            resultBox.style.display = 'block';
+        }
+
+        // 다시 촬영하기 버튼 작동 함수
+        function resetCamera() {
+            isCaptured = false;
+            camBox.style.display = 'block';
+            resultBox.style.display = 'none';
+            statusText.innerText = "QR 코드를 카메라에 비춰주세요...";
+            requestAnimationFrame(scanQR);
+        }
+    </script>
+</body>
+</html>
