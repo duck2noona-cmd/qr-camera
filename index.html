@@ -236,7 +236,7 @@
             requestAnimationFrame(scanQR);
         }
 
-        // 갤럭시/아이폰 공유 및 다운로드 지원 ZIP 함수
+        // 안정적인 2단계 저장/공유 처리 함수
         async function downloadAllAsZip() {
             if (capturedPhotos.length === 0) return;
 
@@ -250,31 +250,38 @@
                 zip.file(photo.fileName, base64Data, { base64: true });
             });
 
+            const fileName = `QR_Photos_${new Date().getTime()}.zip`;
+
             try {
                 const content = await zip.generateAsync({ type: "blob" });
-                const fileName = `QR_Photos_${new Date().getTime()}.zip`;
                 const file = new File([content], fileName, { type: "application/zip" });
 
-                // 웹 공유 API 지원 여부 확인 (갤럭시 Chrome 및 Safari 최신 버전)
+                // 1차 시도: 공유 팝업 (Web Share)
                 if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                    await navigator.share({
-                        files: [file],
-                        title: 'QR 사진 모음',
-                        text: 'QR 인식 사진 ZIP 파일입니다.'
-                    });
-                    statusText.innerText = "공유가 완료되었습니다!";
-                } else {
-                    // 미지원 브라우저인 경우 일반 파일 저장 처리
-                    saveAs(content, fileName);
-                    statusText.innerText = "ZIP 다운로드가 시작되었습니다!";
+                    try {
+                        await navigator.share({
+                            files: [file],
+                            title: 'QR 사진 모음'
+                        });
+                        statusText.innerText = "공유가 완료되었습니다!";
+                        return;
+                    } catch (shareErr) {
+                        // 사용자가 팝업을 직접 닫은 경우
+                        if (shareErr.name === 'AbortError') {
+                            statusText.innerText = "공유가 취소되었습니다.";
+                            return;
+                        }
+                        // 시스템 공유 거부 시 2차(다운로드)로 진행
+                    }
                 }
+
+                // 2차 시도: 일반 파일 다운로드 (삼성 인터넷 안정 지원)
+                saveAs(content, fileName);
+                statusText.innerText = "ZIP 파일이 Download 폴더로 저장되었습니다!";
+
             } catch (err) {
-                if (err.name !== 'AbortError') {
-                    statusText.innerText = "저장/공유 중 오류가 발생했습니다.";
-                    console.error(err);
-                } else {
-                    statusText.innerText = "공유가 취소되었습니다.";
-                }
+                statusText.innerText = "저장 중 오류가 발생했습니다.";
+                console.error(err);
             } finally {
                 zipBtn.disabled = false;
             }
