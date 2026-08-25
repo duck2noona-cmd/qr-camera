@@ -4,9 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>QR 촬영기</title>
-    <!-- QR 인식 및 ZIP 압축 라이브러리 -->
+    <!-- QR 인식, ZIP 압축 및 크로스브라우저 다운로드 라이브러리 -->
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -17,15 +18,12 @@
             padding: 16px;
         }
         h2 { color: #1d1d1f; margin: 10px 0 4px 0; }
-        
-        /* 주의 문구 스타일 추가 */
         .notice {
             font-size: 12px;
             color: #ff3b30;
             margin-bottom: 12px;
             font-weight: 500;
         }
-
         .camera-container {
             position: relative;
             width: 100%;
@@ -66,7 +64,7 @@
         }
         .btn-next {
             background: #34c759;
-            display: none; /* 기본 숨김 */
+            display: none;
         }
         .btn-zip {
             background: #007aff;
@@ -115,7 +113,6 @@
 <body>
 
     <h2>QR 촬영기</h2>
-    <!-- 주의 문구 영역 -->
     <div class="notice">프로토타입 버전입니다. 외부 배포를 금지합니다.</div>
 
     <div class="count-badge">촬영된 사진: <span id="photoCount">0</span>장</div>
@@ -152,7 +149,7 @@
         const photoList = document.getElementById('photoList');
 
         const capturedPhotos = []; 
-        let isPaused = false; // 스캔 일시정지 상태 변수
+        let isPaused = false;
 
         navigator.mediaDevices.getUserMedia({ 
             video: { facingMode: "environment" } 
@@ -176,7 +173,6 @@
                 const code = jsQR(imageData.data, imageData.width, imageData.height);
 
                 if (code && code.data.trim() !== "") {
-                    // QR 인식 성공 시 스캔 정지 및 '다음' 버튼 띄우기
                     isPaused = true;
                     takeSnapshot(code.data);
                     return;
@@ -185,11 +181,8 @@
             requestAnimationFrame(scanQR);
         }
 
-        // 중복 파일명 처리 및 사진 저장 함수
         function takeSnapshot(qrValue) {
             const rawName = qrValue.replace(/[^a-zA-Z0-9가-힣_-]/g, "_");
-            
-            // 동일한 원본 QR값 개수 확인 (중복 체크)
             const sameCount = capturedPhotos.filter(p => p.originalQr === rawName).length;
             
             let finalFileName = "";
@@ -207,14 +200,12 @@
 
             const jpegDataUrl = canvas.toDataURL('image/jpeg', 0.9);
 
-            // 데이터 배열 저장
             capturedPhotos.push({
                 originalQr: rawName,
                 fileName: finalFileName,
                 dataUrl: jpegDataUrl
             });
 
-            // UI 업데이트
             photoCountText.innerText = capturedPhotos.length;
             zipBtn.innerText = `📦 사진 전체 ZIP 다운로드 (${capturedPhotos.length}장)`;
             zipBtn.disabled = false;
@@ -225,10 +216,8 @@
                 statusText.innerText = `📸 인식 성공: ${finalFileName}`;
             }
 
-            // '다음' 버튼 보여주기
             nextBtn.style.display = 'block';
 
-            // 목록 표시 추가
             const item = document.createElement('div');
             item.className = 'photo-item';
             item.innerHTML = `
@@ -240,7 +229,6 @@
             photoList.insertBefore(item, photoList.firstChild);
         }
 
-        // '다음 촬영하기' 버튼 클릭 시 작동
         function resumeScanning() {
             nextBtn.style.display = 'none';
             statusText.innerText = "다음 QR 코드를 비춰주세요...";
@@ -248,11 +236,13 @@
             requestAnimationFrame(scanQR);
         }
 
-        // ZIP 다운로드
+        // 갤럭시/아이폰 호환 ZIP 다운로드 함수
         async function downloadAllAsZip() {
             if (capturedPhotos.length === 0) return;
 
             statusText.innerText = "압축 파일 생성 중...";
+            zipBtn.disabled = true;
+
             const zip = new JSZip();
 
             capturedPhotos.forEach((photo) => {
@@ -260,17 +250,20 @@
                 zip.file(photo.fileName, base64Data, { base64: true });
             });
 
-            const content = await zip.generateAsync({ type: "blob" });
-            const zipUrl = URL.createObjectURL(content);
-
-            const a = document.createElement('a');
-            a.href = zipUrl;
-            a.download = `QR_Photos_${new Date().getTime()}.zip`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-
-            statusText.innerText = "ZIP 다운로드가 시작되었습니다!";
+            try {
+                // Blob 객체 직접 생성 후 FileSaver(saveAs)로 호환성 다운로드 처리
+                const content = await zip.generateAsync({ type: "blob" });
+                const fileName = `QR_Photos_${new Date().getTime()}.zip`;
+                
+                saveAs(content, fileName);
+                
+                statusText.innerText = "ZIP 다운로드가 시작되었습니다!";
+            } catch (err) {
+                statusText.innerText = "다운로드 실패: 브라우저 설정을 확인해주세요.";
+                console.error(err);
+            } finally {
+                zipBtn.disabled = false;
+            }
         }
     </script>
 </body>
