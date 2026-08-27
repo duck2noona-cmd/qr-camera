@@ -3,8 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>QR 촬영기</title>
+    <title>QR 클라우드 촬영기</title>
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <!-- ZIP 압축 라이브러리 추가 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -43,85 +45,115 @@
             word-break: break-all;
         }
         .btn {
-            display: block;
+            display: inline-block;
             width: 100%;
             max-width: 400px;
-            margin: 8px auto;
-            padding: 14px 0;
+            margin: 6px auto;
+            padding: 12px 0;
             color: white;
             border-radius: 10px;
             font-weight: bold;
-            font-size: 16px;
+            font-size: 15px;
             border: none;
             cursor: pointer;
+            text-align: center;
             -webkit-tap-highlight-color: transparent;
         }
         .btn-primary { background: #007aff; }
-        .btn-next { background: #34c759; display: none; }
-        .btn-danger { background: #ff3b30; padding: 6px 12px; font-size: 12px; width: auto; margin: 0; }
+        .btn-success { background: #34c759; }
+        .btn-secondary { background: #8e8e93; }
+        .btn-danger { background: #ff3b30; }
+        .btn-sm { padding: 6px 10px; font-size: 12px; width: auto; margin: 0; }
         
         .folder-item {
+            background: #fafafa;
+            border: 1px solid #e5e5ea;
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 10px;
+        }
+        .folder-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 10px;
-            border: 1px solid #e5e5ea;
-            border-radius: 8px;
             margin-bottom: 8px;
-            cursor: pointer;
         }
-        .folder-item.active {
-            border-color: #007aff;
-            background: #f0f8ff;
+        .folder-actions {
+            display: flex;
+            gap: 6px;
         }
         input[type="text"] {
-            width: calc(100% - 90px);
+            width: calc(100% - 85px);
             padding: 10px;
             border: 1px solid #ccc;
             border-radius: 8px;
-            font-size: 16px; /* 사파리 자동 확대 방지 */
+            font-size: 16px;
         }
         .flex-row { display: flex; gap: 8px; justify-content: space-between; align-items: center; }
         .error-msg { color: #ff3b30; font-size: 13px; margin-top: 6px; }
+        
+        .info-bar {
+            background: #e5f1ff;
+            color: #007aff;
+            padding: 10px 14px;
+            border-radius: 10px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            max-width: 400px;
+            margin: 0 auto 12px auto;
+        }
     </style>
 </head>
 <body>
 
-    <h2>QR 촬영기</h2>
+    <h2>QR 클라우드 촬영기</h2>
 
-    <div class="card">
-        <strong style="display:block; margin-bottom:8px;">📁 작업 폴더 선택 및 생성</strong>
-        <div class="flex-row" style="margin-bottom: 8px;">
-            <input type="text" id="newFolderName" placeholder="새 작업 폴더명 입력">
-            <button type="button" class="btn btn-primary" style="width:80px; margin:0;" onclick="createFolder()">생성</button>
+    <!-- [화면 1] 폴더 리스트 & 생성 화면 -->
+    <div id="homeSection">
+        <div class="card">
+            <strong style="display:block; margin-bottom:8px;">📁 새 작업 폴더 생성</strong>
+            <div class="flex-row" style="margin-bottom: 8px;">
+                <input type="text" id="newFolderName" placeholder="폴더명 입력">
+                <button type="button" class="btn btn-primary" style="width:75px; margin:0;" onclick="createFolder()">생성</button>
+            </div>
+            <div id="errorBox" class="error-msg"></div>
         </div>
-        <div id="errorBox" class="error-msg"></div>
-        <div id="folderList" style="margin-top: 12px;">폴더 목록을 불러오는 중...</div>
+
+        <div class="card">
+            <strong style="display:block; margin-bottom:12px;">📂 폴더 목록</strong>
+            <div id="folderList"></div>
+        </div>
     </div>
 
+    <!-- [화면 2] QR 카메라 스캔 화면 -->
     <div id="scannerSection" style="display: none;">
+        <!-- 상단 폴더 정보 및 뒤로가기 바 -->
+        <div class="info-bar">
+            <span id="scannerTitle">📂 - (사진 0장)</span>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="goBackToHome()">⬅ 목록으로</button>
+        </div>
+
         <div class="camera-container">
             <video id="video" playsinline></video>
         </div>
 
         <div class="status" id="status">카메라 준비 중...</div>
 
-        <button type="button" id="nextBtn" class="btn btn-next" onclick="resumeScanning()">
-            📸 촬영하기
+        <button type="button" id="nextBtn" class="btn btn-success" style="display:none;" onclick="resumeScanning()">
+            📸 다음 촬영하기
         </button>
     </div>
 
     <canvas id="canvas" style="display:none;"></canvas>
 
     <script>
-        let deviceId = localStorage.getItem('qr_device_id');
-        if (!deviceId) {
-            deviceId = 'dev_' + Math.random().toString(36).substr(2, 9);
-            localStorage.setItem('qr_device_id', deviceId);
-        }
-
+        // 로컬스토리지 구조: [{ id: 'f_123', name: 'A구역', photos: [{ fileName: 'QR_01.jpg', image: 'data:image...' }] }]
+        let folders = JSON.parse(localStorage.getItem('qr_folders') || '[]');
         let currentFolderId = null;
         let isPaused = false;
+        let streamObject = null;
 
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
@@ -130,85 +162,145 @@
         const nextBtn = document.getElementById('nextBtn');
         const errorBox = document.getElementById('errorBox');
 
-        document.addEventListener("DOMContentLoaded", fetchFolders);
+        document.addEventListener("DOMContentLoaded", renderFolders);
 
-        async function fetchFolders() {
-            errorBox.innerText = "";
-            try {
-                const res = await fetch(`/api/folders?deviceId=${deviceId}`);
-                if (!res.ok) throw new Error(`서버 응답 오류 (${res.status})`);
-                const folders = await res.json();
-                
-                const listEl = document.getElementById('folderList');
-                if (!Array.isArray(folders) || folders.length === 0) {
-                    listEl.innerHTML = "<p style='color:#8e8e93; font-size:13px;'>생성된 작업 폴더가 없습니다.</p>";
-                    return;
-                }
-
-                listEl.innerHTML = folders.map(f => `
-                    <div class="folder-item ${f.id === currentFolderId ? 'active' : ''}" onclick="selectFolder('${f.id}', '${f.name}')">
-                        <div>
-                            <strong>📂 ${f.name}</strong>
-                            <div style="font-size:12px; color:#8e8e93;">사진 ${f.fileCount || 0}장</div>
-                        </div>
-                        <button type="button" class="btn btn-danger" onclick="event.stopPropagation(); deleteFolder('${f.id}')">삭제</button>
-                    </div>
-                `).join('');
-            } catch (err) {
-                errorBox.innerText = "폴더 목록 불러오기 실패: " + err.message;
+        // 폴더 목록 UI 렌더링
+        function renderFolders() {
+            const listEl = document.getElementById('folderList');
+            if (folders.length === 0) {
+                listEl.innerHTML = "<p style='color:#8e8e93; font-size:13px; text-align:center;'>생성된 작업 폴더가 없습니다.</p>";
+                return;
             }
+
+            listEl.innerHTML = folders.map(f => {
+                const count = f.photos ? f.photos.length : 0;
+                return `
+                    <div class="folder-item">
+                        <div class="folder-header">
+                            <div>
+                                <strong>📂 ${f.name}</strong>
+                                <span style="font-size:12px; color:#8e8e93; margin-left:4px;">(${count}장)</span>
+                            </div>
+                            <button type="button" class="btn btn-primary btn-sm" onclick="openScanner('${f.id}')">📷 촬영하기</button>
+                        </div>
+                        <div class="folder-actions">
+                            <button type="button" class="btn btn-success btn-sm" style="flex:1;" onclick="downloadZip('${f.id}')" ${count === 0 ? 'disabled style="opacity:0.5;"' : ''}>📦 ZIP 다운/공유</button>
+                            <button type="button" class="btn btn-danger btn-sm" onclick="deleteFolder('${f.id}')">삭제</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
         }
 
-        async function createFolder() {
+        // 새 폴더 생성
+        function createFolder() {
             errorBox.innerText = "";
             const input = document.getElementById('newFolderName');
             const name = input.value.trim();
             if (!name) return alert("폴더 이름을 입력해주세요.");
 
-            try {
-                const res = await fetch(`/api/folders`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ deviceId, name })
-                });
+            const newFolder = {
+                id: 'f_' + Date.now(),
+                name: name,
+                photos: []
+            };
 
-                if (!res.ok) throw new Error(`생성 실패 (${res.status})`);
+            folders.push(newFolder);
+            saveFolders();
 
-                input.value = '';
-                fetchFolders();
-            } catch (err) {
-                errorBox.innerText = "폴더 생성 오류: " + err.message;
-            }
+            input.value = '';
+            renderFolders();
         }
 
-        async function deleteFolder(folderId) {
-            if (!confirm("해당 폴더를 삭제하시겠습니까?")) return;
+        // 폴더 삭제
+        function deleteFolder(folderId) {
+            if (!confirm("해당 폴더와 촬영된 사진이 모두 삭제됩니다. 계속하시겠습니까?")) return;
 
-            try {
-                await fetch(`/api/folders/${folderId}`, { method: 'DELETE' });
-                if (currentFolderId === folderId) {
-                    currentFolderId = null;
-                    document.getElementById('scannerSection').style.display = 'none';
+            folders = folders.filter(f => f.id !== folderId);
+            saveFolders();
+            renderFolders();
+        }
+
+        // ZIP 다운로드 및 공유 기능
+        async function downloadZip(folderId) {
+            const targetFolder = folders.find(f => f.id === folderId);
+            if (!targetFolder || !targetFolder.photos || targetFolder.photos.length === 0) {
+                return alert("다운로드할 사진이 없습니다.");
+            }
+
+            const zip = new JSZip();
+            const imgFolder = zip.folder(targetFolder.name);
+
+            // 이미지들을 ZIP에 추가
+            targetFolder.photos.forEach(p => {
+                // Base64 데이터에서 pure base64 문자열 추출
+                const base64Data = p.image.replace(/^data:image\/(png|jpeg|jpg);base64,/, "");
+                imgFolder.file(p.fileName, base64Data, { base64: true });
+            });
+
+            const content = await zip.generateAsync({ type: "blob" });
+            const zipFileName = `${targetFolder.name}.zip`;
+
+            // 모바일 Web Share API 지원 여부 확인 (아이폰 사파리 등)
+            if (navigator.canShare && navigator.canShare({ files: [new File([content], zipFileName, { type: 'application/zip' })] })) {
+                try {
+                    const file = new File([content], zipFileName, { type: 'application/zip' });
+                    await navigator.share({
+                        files: [file],
+                        title: targetFolder.name,
+                        text: `${targetFolder.name} 폴더 사진 모음`
+                    });
+                    return;
+                } catch (err) {
+                    console.log("공유 취소 또는 오류", err);
                 }
-                fetchFolders();
-            } catch (err) {
-                errorBox.innerText = "폴더 삭제 오류: " + err.message;
             }
+
+            // 일반 다운로드 처리
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(content);
+            a.download = zipFileName;
+            a.click();
         }
 
-        function selectFolder(folderId, folderName) {
+        // 화면 전환: QR 촬영 모드 진입
+        function openScanner(folderId) {
             currentFolderId = folderId;
+            const targetFolder = folders.find(f => f.id === folderId);
+            
+            document.getElementById('homeSection').style.display = 'none';
             document.getElementById('scannerSection').style.display = 'block';
-            statusText.innerText = `[${folderName}] 작업 중... QR 코드를 비춰주세요.`;
-            fetchFolders();
+
+            updateScannerHeader();
             startCamera();
         }
 
+        // 스캔 화면 상단 헤더 업데이트
+        function updateScannerHeader() {
+            const targetFolder = folders.find(f => f.id === currentFolderId);
+            if (targetFolder) {
+                const count = targetFolder.photos ? targetFolder.photos.length : 0;
+                document.getElementById('scannerTitle').innerText = `📂 ${targetFolder.name} (${count}장)`;
+            }
+        }
+
+        // 화면 전환: 목록으로 돌아가기
+        function goBackToHome() {
+            stopCamera();
+            document.getElementById('scannerSection').style.display = 'none';
+            document.getElementById('homeSection').style.display = 'block';
+            renderFolders();
+        }
+
+        // 카메라 켜기
         function startCamera() {
-            if (video.srcObject) return;
+            isPaused = false;
+            nextBtn.style.display = 'none';
+            statusText.innerText = "QR 코드를 비춰주세요...";
 
             navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
                 .then((stream) => {
+                    streamObject = stream;
                     video.srcObject = stream;
                     video.setAttribute("playsinline", true);
                     video.play();
@@ -217,6 +309,16 @@
                 .catch(() => statusText.innerText = "카메라를 켤 수 없습니다.");
         }
 
+        // 카메라 끄기
+        function stopCamera() {
+            if (streamObject) {
+                streamObject.getTracks().forEach(track => track.stop());
+                streamObject = null;
+            }
+            video.srcObject = null;
+        }
+
+        // QR 루프 스캔
         function scanQR() {
             if (!isPaused && video.readyState === video.HAVE_ENOUGH_DATA) {
                 canvas.width = video.videoWidth;
@@ -232,19 +334,23 @@
                     return;
                 }
             }
-            requestAnimationFrame(scanQR);
+            if (streamObject) {
+                requestAnimationFrame(scanQR);
+            }
         }
 
+        // 사진 서버 및 로컬스토리지 저장 처리
         async function uploadPhotoToServer(qrValue) {
             statusText.innerText = "서버로 사진 전송 중...";
             const imageDataUrl = canvas.toDataURL('image/jpeg', 0.9);
+            const targetFolder = folders.find(f => f.id === currentFolderId);
 
             try {
                 const res = await fetch(`/api/upload`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        folderId: currentFolderId,
+                        folderName: targetFolder.name,
                         qrValue: qrValue,
                         image: imageDataUrl
                     })
@@ -253,11 +359,29 @@
                 const result = await res.json();
                 if (!res.ok) throw new Error(result.error || "저장 실패");
 
-                statusText.innerText = `✅ 저장 완료: ${result.fileName}`;
+                // 로컬 데이터 업데이트 (중복 이름 체크 및 추가)
+                if (!targetFolder.photos) targetFolder.photos = [];
+                
+                const rawName = qrValue.replace(/[^a-zA-Z0-9가-힣_-]/g, "_");
+                const sameCount = targetFolder.photos.filter(p => p.rawName === rawName).length;
+                
+                let fileName = `${rawName}.jpg`;
+                if (sameCount === 1) fileName = `${rawName}_(중복).jpg`;
+                else if (sameCount > 1) fileName = `${rawName}_(중복${sameCount}).jpg`;
+
+                targetFolder.photos.push({
+                    rawName: rawName,
+                    fileName: fileName,
+                    image: imageDataUrl
+                });
+
+                saveFolders();
+                updateScannerHeader();
+
+                statusText.innerText = `✅ 저장 완료: ${fileName}`;
                 nextBtn.style.display = 'block';
-                fetchFolders();
             } catch (err) {
-                statusText.innerText = "❌ 서버 저장 실패: " + err.message;
+                statusText.innerText = "❌ 저장 실패: " + err.message;
                 nextBtn.style.display = 'block';
             }
         }
@@ -267,6 +391,10 @@
             statusText.innerText = "다음 QR 코드를 비춰주세요...";
             isPaused = false;
             requestAnimationFrame(scanQR);
+        }
+
+        function saveFolders() {
+            localStorage.setItem('qr_folders', JSON.stringify(folders));
         }
     </script>
 </body>
