@@ -2,8 +2,8 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QR 클라우드 촬영기</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>QR 촬영기</title>
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
     <style>
         * { box-sizing: border-box; }
@@ -40,6 +40,7 @@
             color: #007aff;
             min-height: 24px;
             text-align: center;
+            word-break: break-all;
         }
         .btn {
             display: block;
@@ -53,6 +54,7 @@
             font-size: 16px;
             border: none;
             cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
         }
         .btn-primary { background: #007aff; }
         .btn-next { background: #34c759; display: none; }
@@ -77,9 +79,10 @@
             padding: 10px;
             border: 1px solid #ccc;
             border-radius: 8px;
-            font-size: 14px;
+            font-size: 16px; /* 사파리 자동 확대 방지 */
         }
         .flex-row { display: flex; gap: 8px; justify-content: space-between; align-items: center; }
+        .error-msg { color: #ff3b30; font-size: 13px; margin-top: 6px; }
     </style>
 </head>
 <body>
@@ -88,11 +91,12 @@
 
     <div class="card">
         <strong style="display:block; margin-bottom:8px;">📁 작업 폴더 선택 및 생성</strong>
-        <div class="flex-row" style="margin-bottom: 12px;">
+        <div class="flex-row" style="margin-bottom: 8px;">
             <input type="text" id="newFolderName" placeholder="새 작업 폴더명 입력">
-            <button class="btn btn-primary" style="width:80px; margin:0;" onclick="createFolder()">생성</button>
+            <button type="button" class="btn btn-primary" style="width:80px; margin:0;" onclick="createFolder()">생성</button>
         </div>
-        <div id="folderList">폴더 목록을 불러오는 중...</div>
+        <div id="errorBox" class="error-msg"></div>
+        <div id="folderList" style="margin-top: 12px;">폴더 목록을 불러오는 중...</div>
     </div>
 
     <div id="scannerSection" style="display: none;">
@@ -102,8 +106,8 @@
 
         <div class="status" id="status">카메라 준비 중...</div>
 
-        <button id="nextBtn" class="btn btn-next" onclick="resumeScanning()">
-            📸 다음 촬영하기
+        <button type="button" id="nextBtn" class="btn btn-next" onclick="resumeScanning()">
+            📸 촬영하기
         </button>
     </div>
 
@@ -124,16 +128,19 @@
         const ctx = canvas.getContext('2d');
         const statusText = document.getElementById('status');
         const nextBtn = document.getElementById('nextBtn');
+        const errorBox = document.getElementById('errorBox');
 
         document.addEventListener("DOMContentLoaded", fetchFolders);
 
         async function fetchFolders() {
+            errorBox.innerText = "";
             try {
                 const res = await fetch(`/api/folders?deviceId=${deviceId}`);
+                if (!res.ok) throw new Error(`서버 응답 오류 (${res.status})`);
                 const folders = await res.json();
                 
                 const listEl = document.getElementById('folderList');
-                if (folders.length === 0) {
+                if (!Array.isArray(folders) || folders.length === 0) {
                     listEl.innerHTML = "<p style='color:#8e8e93; font-size:13px;'>생성된 작업 폴더가 없습니다.</p>";
                     return;
                 }
@@ -144,38 +151,49 @@
                             <strong>📂 ${f.name}</strong>
                             <div style="font-size:12px; color:#8e8e93;">사진 ${f.fileCount || 0}장</div>
                         </div>
-                        <button class="btn btn-danger" onclick="event.stopPropagation(); deleteFolder('${f.id}')">삭제</button>
+                        <button type="button" class="btn btn-danger" onclick="event.stopPropagation(); deleteFolder('${f.id}')">삭제</button>
                     </div>
                 `).join('');
             } catch (err) {
-                document.getElementById('folderList').innerText = "폴더 목록을 불러오지 못했습니다.";
+                errorBox.innerText = "폴더 목록 불러오기 실패: " + err.message;
             }
         }
 
         async function createFolder() {
+            errorBox.innerText = "";
             const input = document.getElementById('newFolderName');
             const name = input.value.trim();
             if (!name) return alert("폴더 이름을 입력해주세요.");
 
-            await fetch(`/api/folders`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ deviceId, name })
-            });
+            try {
+                const res = await fetch(`/api/folders`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ deviceId, name })
+                });
 
-            input.value = '';
-            fetchFolders();
+                if (!res.ok) throw new Error(`생성 실패 (${res.status})`);
+
+                input.value = '';
+                fetchFolders();
+            } catch (err) {
+                errorBox.innerText = "폴더 생성 오류: " + err.message;
+            }
         }
 
         async function deleteFolder(folderId) {
             if (!confirm("해당 폴더를 삭제하시겠습니까?")) return;
 
-            await fetch(`/api/folders/${folderId}`, { method: 'DELETE' });
-            if (currentFolderId === folderId) {
-                currentFolderId = null;
-                document.getElementById('scannerSection').style.display = 'none';
+            try {
+                await fetch(`/api/folders/${folderId}`, { method: 'DELETE' });
+                if (currentFolderId === folderId) {
+                    currentFolderId = null;
+                    document.getElementById('scannerSection').style.display = 'none';
+                }
+                fetchFolders();
+            } catch (err) {
+                errorBox.innerText = "폴더 삭제 오류: " + err.message;
             }
-            fetchFolders();
         }
 
         function selectFolder(folderId, folderName) {
@@ -233,11 +251,13 @@
                 });
 
                 const result = await res.json();
+                if (!res.ok) throw new Error(result.error || "저장 실패");
+
                 statusText.innerText = `✅ 저장 완료: ${result.fileName}`;
                 nextBtn.style.display = 'block';
                 fetchFolders();
             } catch (err) {
-                statusText.innerText = "❌ 서버 저장 실패. 다시 시도해 주세요.";
+                statusText.innerText = "❌ 서버 저장 실패: " + err.message;
                 nextBtn.style.display = 'block';
             }
         }
